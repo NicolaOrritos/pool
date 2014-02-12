@@ -39,7 +39,9 @@ var defaults = {
     "BAGARINO": {
         "TYPE": "https",
         "HOSTNAME": "localhost",
-        "PORT": 8443
+        "PORT": 8443,
+        "HTTPS_KEY_PATH": "private/key.pem",
+        "HTTPS_CERT_PATH": "private/cert.crt"
     }
 };
 
@@ -64,7 +66,10 @@ function askBagarino(req, callback)
             var options = {
                 host: CONF.BAGARINO.HOSTNAME,
                 port: CONF.BAGARINO.PORT,
-                path: "/tickets/" + ticket + "/status"
+                path: "/tickets/" + ticket + "/status",
+                // key:  fs.readFileSync(CONF.BAGARINO.HTTPS_KEY_PATH, "utf8").toString(),
+                // cert: fs.readFileSync(CONF.BAGARINO.HTTPS_CERT_PATH, "utf8").toString(),
+                rejectUnauthorized: false
             };
 
             var bagarinoCallback = function(response)
