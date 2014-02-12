@@ -1,10 +1,54 @@
 
+console.log("pool server starting...\n");
+
 var static = require("node-static");
+var https  = require("https");
 var http   = require("http");
 var url    = require("url");
+var sjl    = require("sjl");
+var fs     = require("fs");
 
-var files  = new static.Server("./files");
-var errors = new static.Server("./errors");
+
+
+var defaults = {
+    "ENVIRONMENT": "production",
+    
+    "FILES": {
+        "POOL_PATH": "./files",
+        "ERRORS_PATH": "./errors"
+    },
+    
+    "SERVER_TYPE": {
+        "HTTPS": {
+            "ENABLED": true,
+            "KEY":  "private/key.pem",
+            "CERT": "private/cert.crt",
+            "PORT": 4443
+        },
+        "HTTP": {
+            "ENABLED": false,
+            "PORT": 8080
+        }
+    },
+    
+    "LOGGING": {
+        "ENABLED": true,
+        "PATH": "/var/log"
+    },
+    
+    "BAGARINO": {
+        "TYPE": "https",
+        "HOSTNAME": "localhost",
+        "PORT": 8443
+    }
+};
+
+var CONF = sjl("/etc/pool.conf", defaults);
+
+
+var files  = new static.Server(CONF.FILES.POOL_PATH);
+var errors = new static.Server(CONF.FILES.ERRORS_PATH);
+
 
 
 function askBagarino(req, callback)
@@ -18,8 +62,8 @@ function askBagarino(req, callback)
             var ticket = data.query.ticket;
             
             var options = {
-                host: "localhost",
-                port: 8124,
+                host: CONF.BAGARINO.HOSTNAME,
+                port: CONF.BAGARINO.PORT,
                 path: "/tickets/" + ticket + "/status"
             };
 
@@ -49,7 +93,14 @@ function askBagarino(req, callback)
 
             console.log("Going to ask bagarino web-service for ticket '%s' validity...", ticket);
             
-            http.request(options, bagarinoCallback).end();
+            if (CONF.BAGARINO.TYPE == "https")
+            {
+                https.request(options, bagarinoCallback).end();
+            }
+            else
+            {
+                http.request(options, bagarinoCallback).end();
+            }
         }
         else if (callback)
         {
@@ -62,45 +113,97 @@ function askBagarino(req, callback)
     }
 }
 
-function serveContent(req, res)
+
+
+if (CONF.SERVER_TYPE.HTTP.ENABLED)
 {
-    // 1. Ask bagarino about the validity of this ticket
-    askBagarino(req, function(err, result)
+    http.createServer(function(req, res)
     {
-        var isOK = false;
-
-        if (err)
+        req.addListener("end", function(stream)
         {
-            console.log("An error occurred evaluating this request. %s", err);
-        }
-        else
-        {
-            isOK = result;
-        }
+            // 1. Ask bagarino about the validity of this ticket
+            askBagarino(req, function(err, result)
+            {
+                var isOK = false;
 
-        if (isOK)
-        {
-            // 2a. Serve the content if everything went well
-            files.serve(req, res);
+                if (err)
+                {
+                    console.log("An error occurred evaluating this request. %s", err);
+                }
+                else
+                {
+                    isOK = result;
+                }
 
-            console.log("Everything is OK. Answering request '%s'...", req.url);
-        }
-        else
-        {
-            // 2b. Serve an error otherwise
-            errors.serveFile("403.json", 403, {}, req, res);
+                if (isOK)
+                {
+                    // 2a. Serve the content if everything went well
+                    files.serve(req, res);
 
-            console.log("Could not answer '%s' request positively", req.url);
-        }
+                    console.log("Everything is OK. Answering request '%s'...", req.url);
+                }
+                else
+                {
+                    // 2b. Serve an error otherwise
+                    errors.serveFile("403.json", 403, {}, req, res);
+
+                    console.log("Could not answer '%s' request positively", req.url);
+                }
+            });
+        }).resume();
+
+    }).listen(CONF.SERVER_TYPE.HTTP.PORT, function()
+    {
+        console.log("\npool HTTP server started on port %d\n", CONF.SERVER_TYPE.HTTP.PORT);
+    });
+}
+
+if (CONF.SERVER_TYPE.HTTPS.ENABLED)
+{
+    var privateKey  = fs.readFileSync(CONF.SERVER_TYPE.HTTPS.KEY,  "utf8");
+    var certificate = fs.readFileSync(CONF.SERVER_TYPE.HTTPS.CERT, "utf8");
+    
+    var credentials = {key: privateKey, cert: certificate};
+    
+    https.createServer(credentials, function(req, res)
+    {
+        req.addListener("end", function(stream)
+        {
+            // 1. Ask bagarino about the validity of this ticket
+            askBagarino(req, function(err, result)
+            {
+                var isOK = false;
+
+                if (err)
+                {
+                    console.log("An error occurred evaluating this request. %s", err);
+                }
+                else
+                {
+                    isOK = result;
+                }
+
+                if (isOK)
+                {
+                    // 2a. Serve the content if everything went well
+                    files.serve(req, res);
+
+                    console.log("Everything is OK. Answering request '%s'...", req.url);
+                }
+                else
+                {
+                    // 2b. Serve an error otherwise
+                    errors.serveFile("403.json", 403, {}, req, res);
+
+                    console.log("Could not answer '%s' request positively", req.url);
+                }
+            });
+        }).resume();
+
+    }).listen(CONF.SERVER_TYPE.HTTPS.PORT, function()
+    {
+        console.log("\npool HTTPS server started on port %d\n", CONF.SERVER_TYPE.HTTPS.PORT);
     });
 }
 
 
-http.createServer(function(req, res)
-{
-    req.addListener("end", serveContent).resume();
-    
-}).listen(8080, function()
-{
-    console.log("pool server started");
-});
