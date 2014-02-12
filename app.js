@@ -98,14 +98,9 @@ function askBagarino(req, callback)
 
             console.log("Going to ask bagarino web-service for ticket '%s' validity...", ticket);
             
-            if (CONF.BAGARINO.TYPE == "https")
-            {
-                https.request(options, bagarinoCallback).end();
-            }
-            else
-            {
-                http.request(options, bagarinoCallback).end();
-            }
+            var svc = (CONF.BAGARINO.TYPE == "https") ? https : http;
+            
+            svc.request(options, bagarinoCallback).end();
         }
         else if (callback)
         {
